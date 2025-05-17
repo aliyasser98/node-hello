@@ -1,0 +1,52 @@
+name: CI/CD Pipeline
+on:
+  push:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - run: npm install
+      - run: npm run lint
+
+  Build-and-Push:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set IMAGE_TAG
+        run: echo "IMAGE_TAG=ghcr.io/${{ secrets.GHCR_USERNAME }}/nodejs-app:latest" >> $GITHUB_ENV
+
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
+
+      - name: Build Docker Image
+        run: docker build -t $IMAGE_TAG .
+
+      - name: Push Docker Image
+        run: docker push $IMAGE_TAG
+  Deploy:
+    needs: Build-and-Push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Force ECS Deploy
+        run: |
+          aws ecs update-service \
+            --cluster ecs-cluster \
+            --service nodejs-app-service \
+            --force-new-deployment \
+            --region ${{ secrets.AWS_REGION }}
